@@ -3,7 +3,7 @@ title: "PWYW Effort"
 output: word_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE}  
 
 library(tidyverse)
 library(lsr)
@@ -312,7 +312,7 @@ pwyw.zeros = pwyw.zeros %>%
            (Q7.18 == 70 & !is.na(Q7.18)) +
            (Q7.19 == 78 & !is.na(Q7.19)))
 
-#particpant 58 lol. some people didnt put a number or na -- recode as na for purpose of study# 
+#some people didnt put a number or na -- recode as na for purpose of study# 
 #also account for people who put input but clearly didn't try to count -- nonsensical answers#
 
 pwyw.zeros.summ <- pwyw %>% 
