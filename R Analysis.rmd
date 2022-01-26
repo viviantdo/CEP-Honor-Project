@@ -1,0 +1,387 @@
+---
+title: "PWYW Effort"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(lsr)
+
+dark_theme <- function(){
+  
+  theme(plot.background = element_rect(fill = "grey12"),
+        title = element_text(family = "Verdana", size = 25),
+        axis.title = element_text(family = "Verdana", size = 25, color = "white"), 
+        axis.text.x = element_text(family = "Verdana", size = 22, color = "white"),
+        axis.text.y = element_text(family = "Verdana", size = 22, color = "white"),
+        axis.ticks = element_line(color = "white"),
+        legend.title = element_text(family = "Verdana", size = 22, color = "white"),
+        legend.text = element_text(family = "Verdana", size = 22, color = "white"),
+        #legend.position = c(0.82, 0.9),
+        legend.background = element_rect(size=0.5, linetype="solid", fill = "grey12", color = "white"),
+        strip.text = element_text(family = "Verdana",size = 20),
+        panel.background = element_rect(fill = "grey12", color = "grey12"),
+        panel.grid.major.x = element_blank(), 
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.line.x = element_line(color="white"),
+        axis.line.y = element_line(color="white"),
+        plot.margin = margin(t = 20, l = 20, b = 20, r = 20, unit = "pt")) }
+
+```
+
+## Data Prep
+```{r}
+
+pwyw <- read.csv("PWYW Effort.csv",
+                 header = T,
+                 na.strings = c(""))
+
+pwyw <- as_tibble(pwyw)
+pwyw <- pwyw[ -c( 1:2), ]
+
+pwyw <- pwyw %>%
+  filter(Finished == 1)
+
+pwyw <- pwyw[ !duplicated(pwyw$id), ] 
+
+
+pwyw <- pwyw %>%
+  mutate(Decoy = ifelse(str_detect(DecoyEffect_DO, "Q5.1"), "Core",
+                        ifelse(str_detect(DecoyEffect_DO, "Q5.2"), "Expanded", "")),
+         Sunk = ifelse(str_detect(SunkCost_DO, "Q6.1"), "Cost",
+                       ifelse(str_detect(SunkCost_DO, "Q6.2"), "Free", "")),
+         Gamble = coalesce(Q5.1, Q5.2),
+         Attend = coalesce(Q6.1, Q6.2),
+         Tables = rowSums(!is.na(pwyw[, 30:44]) ))
+
+
+pwyw <- pwyw %>%
+  select(IMC = Q8.1_7,
+         Motivated = Q9.1,
+         Age = Q9.2,
+         Gender = Q9.3,
+         Gender.O = Q9.3_4_TEXT,
+         Native = Q9.4,
+         Comment = Q9.5,
+         Condition,
+         Decoy:Tables) %>%
+  mutate(Participant = 1:n())
+
+pwyw <- pwyw %>%
+  mutate_at(vars(c(1:3, 12, 13)), function(x)as.numeric(as.character(x))) %>%
+  mutate_at(vars(c(3:11, 14)), as.factor)
+
+
+
+```
+
+## Self-reported Motivation
+```{r}
+
+pwyw.motivation.agg <- pwyw %>%
+  
+  group_by(Condition) %>%
+  
+  summarize(mean = mean(Motivated),
+            sd = sd(Motivated),
+            sem = sd(Motivated)/ sqrt(n()),
+            n = n()) 
+
+
+pwyw.motivation <- aov(Motivated ~ Condition, data = pwyw)
+summary(pwyw.motivation)
+anova( lm ( Motivated ~ Condition, data = pwyw))
+etaSquared(pwyw.motivation, type =3, anova = T)
+
+```
+
+## Figure for Mean Motivation
+
+```{r}
+
+
+pwyw %>%
+  
+  ggplot(aes(x = Condition, y = Motivated)) +
+  geom_violin(width = 0.80) + 
+  geom_boxplot(width=0.2, color="grey12", position = position_dodge(0.8), show.legend = F) +
+  scale_x_discrete(name = "Condition", labels = c("Control", "PWYW", "SSR")) +
+  scale_y_continuous(name = "Self-reported Motivation",
+                     expand = c(0, 0, 0, 0),
+                     limits = c(1, 9),
+                     breaks = seq(1, 9),
+                     labels = seq(1, 9)) +
+  dark_theme()
+
+```
+## Decoy Effect
+```{r}
+
+pwyw.decoy.agg <- pwyw %>%
+  
+  group_by(Condition, Decoy, Gamble) %>%
+  
+  summarize(Count = n()) %>%
+  mutate(Percent = Count/sum(Count)*100, 
+         Percent = round(Percent, digits = 2), 
+         Condition = droplevels(Condition),
+         Gamble = droplevels(Gamble))
+  
+
+pwyw.decoy <- pwyw %>% select(Condition, Decoy, Gamble) %>% mutate(Gamble.Binary = ifelse(Gamble == "2", 1, 0),
+                                                                   Condition = droplevels(Condition),
+                                                                   Gamble = droplevels(Gamble))
+
+
+fit_no_inter = glm(Gamble.Binary ~ Condition + Decoy, data = pwyw.decoy, family = binomial)
+fit_inter = glm(Gamble.Binary ~ Condition * Decoy, data = pwyw.decoy, family = binomial)
+
+anova(fit_no_inter, fit_inter)
+
+summary(fit_no_inter)
+
+exp(0.6092)
+
+#logistic regression with condition and decoy presence as dummy variables
+```
+## Figure for Decoy Effect
+```{r}
+
+pwyw.decoy.agg %>%
+  
+  filter(Gamble == 2) %>%
+  
+  ggplot(aes(x = Condition, y = Percent, fill = Decoy)) +
+  geom_bar(position = "dodge", stat = "identity", width = .75, size = 1, color = "white") +
+  scale_fill_manual(values = c("white", "grey12"), name = "Set", 
+                    labels = c("Core", "Expanded")) +
+  scale_x_discrete(name = "Condition", labels = c("Control", "PWYW", "SSR")) +
+  scale_y_continuous(name = "Percent (%)",
+                     expand = c(0, 0, 0, 0),
+                     limits = c(0, 40),
+                     breaks = seq(0, 40, by = 5),
+                     labels = seq(0, 40, by = 5)) + 
+  geom_text(aes( label = round(Percent, digits = 2)), position = position_dodge(0.8), vjust = -1.4, 
+            family = "Verdana", size = 8, color = "white", data = subset(pwyw.decoy.agg, Gamble == 2)) +
+  dark_theme()
+
+```
+
+
+
+
+## Sunk Cost Effect
+```{r}
+
+pwyw.sunk.agg <- pwyw %>%
+  
+  group_by(Condition, Sunk) %>%
+  
+  summarize(mean = mean(Attend, na.rm = T),
+            sd = sd(Attend, na.rm = T),
+            sem = sd(Attend, na.rm = T)/ sqrt(n()),
+            n = n()) 
+
+pwyw.sunk = pwyw %>% select(Condition, Sunk, Attend) %>% mutate(Condition = droplevels(Condition))
+
+ggplot(pwyw.sunk, aes(x = Condition, fill = Sunk, y = Attend)) + geom_boxplot()
+
+fit_no_inter = lm(Attend ~ Condition + Sunk, data = pwyw.sunk)
+fit_inter = lm(Attend ~ Condition * Sunk, data = pwyw.sunk)
+
+anova(fit_no_inter, fit_inter)
+
+summary(fit_no_inter)
+
+
+#pwyw.sunk <- aov(Attend ~ Condition * Sunk, data = pwyw)
+#summary(pwyw.sunk)
+#anova( lm ( Attend ~ Condition * Sunk, data = pwyw))
+#etaSquared(pwyw.sunk, type =3, anova = T)
+
+```
+
+## Figure for Sunk Cost Effect
+
+```{r}
+
+
+pwyw %>%
+  
+  drop_na(Attend) %>%
+  
+  ggplot(aes(x = Condition, y = Attend, fill = Sunk)) +
+  geom_violin(width = 1, color = "white") + 
+  geom_boxplot(width=0.2, color="white", position = position_dodge(1), show.legend = F) +
+  scale_fill_manual(values = c("grey12", "black"), labels = c("Paid", "Free")) +
+  scale_x_discrete(name = "Condition", labels = c("Control", "PWYW", "SSR")) +
+  scale_y_continuous(name = "Attend Rating \n 1= stay home, 9= go to game",
+                     expand = c(0, 0, 0, 0),
+                     limits = c(1, 9),
+                     breaks = seq(1, 9),
+                     labels = seq(1, 9)) +
+  dark_theme()
+
+```
+
+## Analysis on Real Effort Task
+```{r}
+
+table(pwyw$Condition, pwyw$Tables)
+
+pwyw.effort.agg <- pwyw %>%
+  
+  group_by(Condition) %>%
+  
+  summarize(mean = mean(Tables, na.rm = T),
+            sd = sd(Tables, na.rm = T),
+            sem = sd(Tables, na.rm = T)/ sqrt(n()),
+            n = n()) 
+
+
+```
+## IMC Check
+```{r}
+
+pwyw <- pwyw %>%
+  
+  mutate(pay_attn = ifelse(IMC == 3 & !is.na(IMC), "yes", "no"))
+
+pwyw.imc.agg <- pwyw %>%
+  
+  group_by(Condition, pay_attn) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n), 3)) %>%
+  drop_na()
+
+
+pwyw.imc.agg <- pwyw %>%
+  
+  group_by(Condition, IMC) %>%
+  summarise(n = n()) %>%
+  mutate(freq = round(n / sum(n), 3)) %>%
+  drop_na()
+
+s
+
+chisq.test(table(pwywx2$Condition, pwywx2$pay_attn))
+
+fisher.test(table(pwywx2$Condition, pwywx2$pay_attn))
+
+```
+
+## Counting 0s
+```{r}
+#roll back the data prep a bit#
+pwyw <- read.csv("PWYW Effort.csv",
+                 header = T,
+                 na.strings = c(""))
+
+pwyw <- as_tibble(pwyw)
+pwyw <- pwyw[ -c( 1:2), ]
+
+pwyw <- pwyw %>%
+  filter(Finished == 1)
+
+pwyw <- pwyw[ !duplicated(pwyw$id), ] 
+
+pwyw.zeros <- pwyw %>%
+  
+  select(Condition, 
+         paste0("Q7.", 5:19)) 
+
+pwyw.zeros$n.na = apply(pwyw.zeros, 1, function(x) sum(is.na(x)))
+
+pwyw.zeros = pwyw.zeros %>%
+  mutate(n.correct = (Q7.5 == 72 & !is.na(Q7.5)) +
+           (Q7.6 == 80 & !is.na(Q7.6)) +
+           (Q7.7 == 69 & !is.na(Q7.7)) +
+           (Q7.8 == 76 & !is.na(Q7.8)) +
+           (Q7.9 == 63 & !is.na(Q7.9)) +
+           (Q7.10 == 75 & !is.na(Q7.10)) +
+           (Q7.11 == 81 & !is.na(Q7.11)) +
+           (Q7.12 == 73 & !is.na(Q7.12)) +
+           (Q7.13 == 78 & !is.na(Q7.13)) +
+           (Q7.14 == 67 & !is.na(Q7.14)) +
+           (Q7.15 == 75 & !is.na(Q7.15)) +
+           (Q7.16 == 66 & !is.na(Q7.16)) +
+           (Q7.17 == 82 & !is.na(Q7.17)) +
+           (Q7.18 == 70 & !is.na(Q7.18)) +
+           (Q7.19 == 78 & !is.na(Q7.19)))
+
+#particpant 58 lol. some people didnt put a number or na -- recode as na for purpose of study# 
+#also account for people who put input but clearly didn't try to count -- nonsensical answers#
+
+pwyw.zeros.summ <- pwyw %>% 
+  
+  mutate(Tables = rowSums(!is.na(pwyw[, 30:44]))) %>%
+  #check this line again ^^ move below other stuff to have it show up on table#
+  
+  group_by(Condition) %>%
+  
+  summarize(mean = mean(Tables),
+            sd = sd(Tables),
+            sem = sd(Tables)/ sqrt(n()),
+            n = n()) 
+
+pwyw.zeros.agg = pwyw.zeros %>% mutate_if(is.factor, as.character)
+pwyw.zeros.agg = pwyw.zeros.agg %>% mutate_if(is.character, as.numeric)
+pwyw.zeros.agg$n.na = apply(pwyw.zeros.agg, 1, function(x) sum(is.na(x)))
+
+#zeros analysis below
+
+boxplot(mean ~ Condition, data = pwyw.zeros.summ)
+boxplot(n.correct ~ Condition, data = pwyw.zeros.agg)
+boxplot(n.na ~ Condition, data = pwyw.zeros.agg)
+
+fit = aov(n.correct ~ as.factor(Condition), data = pwyw.zeros.agg)
+fit2 = aov(n.na ~ as.factor(Condition), data = pwyw.zeros.agg)
+
+anova(fit)
+anova(fit2)
+
+kruskal.test(n.correct ~ as.factor(Condition), data = pwyw.zeros.agg)
+kruskal.test(n.na ~ as.factor(Condition), data = pwyw.zeros.agg)
+
+TukeyHSD(fit)
+TukeyHSD(fit2)
+```
+## Need for Cognition
+```{r}
+
+#double check this with how past research scores and interprets these scores#
+need.cog <- pwyw %>%
+  
+  select(Condition, 
+         paste0("Q8.1_", 1:6)) %>%
+  mutate_at(2:7, function(x){as.numeric(as.character(x))}) %>% 
+  # mutate_at(2:7, function(x){ifelse(is.na(x),0,x)}) %>%   #just drop na from sum# 
+        #look at how many people actually completed     this#
+  # mutate(Condition = droplevels(Condition)) %>% 
+  mutate_at(c(2,6), function(x){case_when(x==1~5,x==2~4,x==4~2,x==5~1,TRUE~x)})
+
+need.cog$sum = rowSums(need.cog[,-1])
+
+boxplot(sum ~ Condition, data = need.cog)
+
+# bartlett.test(sum~as.factor(Condition), data = need.cog)
+
+anova(aov(sum~as.factor(Condition), data = need.cog))
+
+kruskal.test(sum~as.factor(Condition), data = need.cog)
+```
+
+## Clean Up Lines
+```{r}
+# Clear environment
+rm(list = ls()) 
+
+# Clear packages
+p_unload(all)  # Remove all add-ons
+
+# Clear console
+cat("\014")  # ctrl+L
+```
